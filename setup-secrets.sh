@@ -40,6 +40,7 @@ cat > "${SECRETS_FILE}" << EOF
 client_id = "${OIDC_CLIENT_ID}"
 client_secret = "${OIDC_CLIENT_SECRET}"
 issuer_url = "${OIDC_ISSUER_URL}"
+redirect_uri = "https://penalties.portersparadise.com/oauth2callback"
 EOF
 
 # Add allowed domains if specified
