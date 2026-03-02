@@ -17,7 +17,7 @@ steps:
   - name: deploy
     image: plugins/webhook
     settings:
-      urls: https://portainer.portersparadise.com/api/stacks/webhooks/c1be8523-a664-45d6-a74d-55493153a333
+      urls: http://192.168.1.125:9996/api/stacks/webhooks/1b812d0f-88f6-477e-ae01-aaa6b416f313
 
 trigger:
   branch:
