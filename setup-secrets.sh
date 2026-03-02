@@ -81,5 +81,5 @@ echo ""
 echo "Configuration:"
 echo "  Client ID: ${OIDC_CLIENT_ID}"
 echo "  Issuer URL: ${OIDC_ISSUER_URL}"
-[ -n "${OIDC_ALLOWED_DOMAINS}" ] && echo "  Allowed Domains: ${OIDC_ALLOWED_DOMAINS}"
-[ -n "${OIDC_ALLOWED_EMAILS}" ] && echo "  Allowed Emails: ${OIDC_ALLOWED_EMAILS}"
+[ -n "${OIDC_ALLOWED_DOMAINS}" ] && echo "  Allowed Domains: ${OIDC_ALLOWED_DOMAINS}" || true
+[ -n "${OIDC_ALLOWED_EMAILS}" ] && echo "  Allowed Emails: ${OIDC_ALLOWED_EMAILS}" || true
