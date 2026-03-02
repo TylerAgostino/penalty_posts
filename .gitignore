@@ -79,6 +79,7 @@ temp/
 *.tmp
 .cache/
 
+
 # Security - additional safeguards
 config.json
 credentials.json
