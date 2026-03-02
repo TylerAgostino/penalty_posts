@@ -38,7 +38,7 @@ else\n\
 fi\n\
 \n\
 # Start Streamlit\n\
-exec streamlit run app.py\n\
+exec streamlit run /app/app.py\n\
 ' > /app/entrypoint.sh && chmod +x /app/entrypoint.sh
 
 # Use the entrypoint script
