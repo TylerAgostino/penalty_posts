@@ -1,0 +1,21 @@
+version: '3.8'
+
+services:
+  discord-post-manager:
+    build: .
+    container_name: penalty-posts-app
+    ports:
+      - '8501:8501'
+    environment:
+      - BOT_TOKEN=${BOT_TOKEN}
+      - OIDC_CLIENT_ID=${OIDC_CLIENT_ID}
+      - OIDC_CLIENT_SECRET=${OIDC_CLIENT_SECRET}
+      - OIDC_ISSUER_URL=${OIDC_ISSUER_URL:-https://accounts.google.com}
+      - OIDC_ALLOWED_DOMAINS=${OIDC_ALLOWED_DOMAINS}
+      - OIDC_ALLOWED_EMAILS=${OIDC_ALLOWED_EMAILS}
+      - ALLOWED_GUILD_IDS=${ALLOWED_GUILD_IDS}
+    restart: unless-stopped
+    volumes:
+      - ./app.py:/app/app.py
+    stdin_open: true
+    tty: true

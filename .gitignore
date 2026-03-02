@@ -1,0 +1,89 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
+venv/
+ENV/
+env/
+.venv
+.virtualenv
+
+# Environment variables - NEVER COMMIT THESE
+.env
+.env.local
+.env.development
+.env.production
+.env.staging
+.env.test
+.env.*.local
+
+# Streamlit secrets - NEVER COMMIT THESE
+.streamlit/secrets.toml
+.streamlit/credentials.toml
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.zed/
+
+# OS
+.DS_Store
+Thumbs.db
+*.tmp
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Desktop.ini
+
+# Docker
+.dockerignore
+
+# Logs
+*.log
+logs/
+*.log.*
+
+# Backup files
+*.bak
+*.backup
+*~
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+.cache/
+
+# Security - additional safeguards
+config.json
+credentials.json
+secrets.json
+*.key
+*.pem
+*.cert
+*.crt
