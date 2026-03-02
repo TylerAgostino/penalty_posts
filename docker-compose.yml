@@ -2,8 +2,8 @@ version: '3.8'
 
 services:
   discord-post-manager:
-    build: .
-    container_name: penalty-posts-app
+    image: tyleragostino/penalty_posts:latest
+    container_name: penalty-posts
     ports:
       - '8501:8501'
     environment:
@@ -15,7 +15,3 @@ services:
       - OIDC_ALLOWED_EMAILS=${OIDC_ALLOWED_EMAILS}
       - ALLOWED_GUILD_IDS=${ALLOWED_GUILD_IDS}
     restart: unless-stopped
-    volumes:
-      - ./app.py:/app/app.py
-    stdin_open: true
-    tty: true
