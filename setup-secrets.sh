@@ -12,11 +12,13 @@ SECRETS_FILE="${SECRETS_DIR}/secrets.toml"
 mkdir -p "${SECRETS_DIR}"
 
 # Check if required environment variables are set
-if [ -z "${OIDC_CLIENT_ID}" ] || [ -z "${OIDC_CLIENT_SECRET}" ]; then
+if [ -z "${OIDC_CLIENT_ID}" ] || [ -z "${OIDC_CLIENT_SECRET}" ] || [ -z "${OIDC_REDIRECT_URI}" ] || [ -z "${OIDC_COOKIE_SECRET}" ]; then
     echo "Error: Required environment variables not set"
     echo "Please set the following environment variables:"
     echo "  - OIDC_CLIENT_ID"
     echo "  - OIDC_CLIENT_SECRET"
+    echo "  - OIDC_REDIRECT_URI"
+    echo "  - OIDC_COOKIE_SECRET"
     echo ""
     echo "Optional environment variables:"
     echo "  - OIDC_ISSUER_URL (defaults to https://accounts.google.com)"
@@ -36,11 +38,15 @@ cat > "${SECRETS_FILE}" << EOF
 # Generated at: $(date -u +"%Y-%m-%d %H:%M:%S UTC")
 # DO NOT commit this file to version control
 
-[auth.oidc]
+[auth]
 client_id = "${OIDC_CLIENT_ID}"
 client_secret = "${OIDC_CLIENT_SECRET}"
+redirect_uri = "${OIDC_REDIRECT_URI}"
+cookie_secret = "${OIDC_COOKIE_SECRET}"
 issuer_url = "${OIDC_ISSUER_URL}"
-redirect_uri = "https://penalties.portersparadise.com/oauth2callback"
+server_metadata_url = "https://accounts.google.com/.well-known/openid-configuration"
+client_kwargs = { "scope" = "openid email profile https://www.googleapis.com/auth/calendar" }
+
 EOF
 
 # Add allowed domains if specified
@@ -81,6 +87,7 @@ echo "✓ secrets.toml created successfully at ${SECRETS_FILE}"
 echo ""
 echo "Configuration:"
 echo "  Client ID: ${OIDC_CLIENT_ID}"
+echo "  Redirect URI: ${OIDC_REDIRECT_URI}"
 echo "  Issuer URL: ${OIDC_ISSUER_URL}"
 [ -n "${OIDC_ALLOWED_DOMAINS}" ] && echo "  Allowed Domains: ${OIDC_ALLOWED_DOMAINS}" || true
 [ -n "${OIDC_ALLOWED_EMAILS}" ] && echo "  Allowed Emails: ${OIDC_ALLOWED_EMAILS}" || true
