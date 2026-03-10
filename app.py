@@ -54,6 +54,7 @@ def start_bot_background(token, state):
         intents = discord.Intents.default()
         intents.guilds = True
         intents.messages = True
+        intents.members = True
 
         client = discord.Client(intents=intents)
         state["client"] = client
@@ -128,6 +129,28 @@ def get_channels(guild):
         for channel in guild.channels
         if isinstance(channel, discord.TextChannel)
     ]
+
+
+def get_guild_members(guild):
+    """Get non-bot members of a guild, sorted by display name"""
+    if not guild:
+        return []
+    return sorted(
+        [member for member in guild.members if not member.bot],
+        key=lambda m: m.display_name.lower(),
+    )
+
+
+def format_member_label(member):
+    """Format a member for display in the selector"""
+    if member.nick:
+        return f"{member.nick} (@{member.name})"
+    return f"@{member.name}"
+
+
+def build_mention(member):
+    """Build a Discord mention string for a member"""
+    return f"<@{member.id}>"
 
 
 # Send message to Discord
@@ -282,11 +305,59 @@ def main():
 
                     # Message content
                     st.subheader("Message Content")
+
+                    # Member tagging section
+                    with st.expander("🏷️ Tag Members", expanded=False):
+                        members = get_guild_members(selected_guild)
+
+                        if not members:
+                            st.info(
+                                "No members found. Make sure the bot has the **Server Members Intent** "
+                                "enabled in the Discord Developer Portal."
+                            )
+                        else:
+                            st.caption(
+                                f"{len(members)} member(s) in **{selected_guild_name}**. "
+                                "Select one or more to insert their mention(s) into the message."
+                            )
+
+                            member_map = {format_member_label(m): m for m in members}
+
+                            selected_member_labels = st.multiselect(
+                                "Search and select members to tag",
+                                options=list(member_map.keys()),
+                                placeholder="Type a name to search...",
+                                help="Selected members will be inserted as mentions at the end of your message when you click 'Insert Mentions'.",
+                            )
+
+                            if selected_member_labels:
+                                mention_preview = " ".join(
+                                    build_mention(member_map[label])
+                                    for label in selected_member_labels
+                                )
+                                st.code(mention_preview, language=None)
+                                st.caption(
+                                    "👆 This is how the mentions will appear in your message."
+                                )
+
+                                if st.button("➕ Insert Mentions into Message"):
+                                    existing = st.session_state.get("post_content", "")
+                                    separator = (
+                                        " "
+                                        if existing and not existing.endswith(" ")
+                                        else ""
+                                    )
+                                    st.session_state["post_content"] = (
+                                        existing + separator + mention_preview
+                                    )
+                                    st.rerun()
+
                     message_content = st.text_area(
                         "Post Content",
                         height=200,
                         placeholder="Write your message here...",
-                        help="Enter the text content of your post",
+                        help="Enter the text content of your post. Use the 'Tag Members' section above to insert member mentions.",
+                        key="post_content",
                     )
 
                     # File uploads
