@@ -1,18 +1,17 @@
-import asyncio
 import io
 import os
-import threading
-from typing import List, Optional
+from typing import Dict, List, Optional, Tuple
 
-import discord
+import requests
 import streamlit as st
+
+# Discord REST API base URL
+DISCORD_API_BASE = "https://discord.com/api/v10"
 
 # Page configuration
 st.set_page_config(page_title="Discord Post Manager", page_icon="📝", layout="wide")
 
 # Check authentication
-# Note: st.user is a dict-like object. If empty, user is not logged in.
-# OIDC is available in Streamlit 1.40.0+ when configured in .streamlit/config.toml
 if not st.user or not st.user.is_logged_in:
     st.error("🔒 Authentication Required")
     st.info(
@@ -32,403 +31,337 @@ with st.sidebar:
     st.divider()
 
 
-# Global bot client and connection state
-@st.cache_resource
-def get_bot_state():
-    """Initialize and return bot state dictionary"""
-    return {
-        "client": None,
-        "ready": False,
-        "connected": False,
-        "user": None,
-        "error": None,
-        "loop": None,
-        "thread": None,
-    }
+# ---------------------------------------------------------------------------
+# Discord REST helpers
+# ---------------------------------------------------------------------------
 
 
-def start_bot_background(token, state):
-    """Start the Discord bot in a background thread"""
+def _bot_headers(token: str) -> Dict[str, str]:
+    return {"Authorization": f"Bot {token}"}
 
-    async def run_bot():
-        intents = discord.Intents.default()
-        intents.guilds = True
-        intents.messages = True
-        intents.members = True
 
-        client = discord.Client(intents=intents)
-        state["client"] = client
+@st.cache_data(ttl=60, show_spinner=False)
+def fetch_bot_user(token: str) -> Dict:
+    """Fetch the bot's own user object to verify connectivity."""
+    r = requests.get(f"{DISCORD_API_BASE}/users/@me", headers=_bot_headers(token))
+    r.raise_for_status()
+    return r.json()
 
-        @client.event
-        async def on_ready():
-            state["ready"] = True
-            state["connected"] = True
-            state["user"] = client.user
 
-        @client.event
-        async def on_disconnect():
-            state["connected"] = False
+@st.cache_data(ttl=300, show_spinner=False)
+def fetch_guilds(token: str) -> List[Dict]:
+    """Fetch guilds the bot belongs to, optionally filtered by ALLOWED_GUILD_IDS."""
+    r = requests.get(
+        f"{DISCORD_API_BASE}/users/@me/guilds", headers=_bot_headers(token)
+    )
+    r.raise_for_status()
+    guilds: List[Dict] = r.json()
 
-        @client.event
-        async def on_resumed():
-            state["connected"] = True
-
+    allowed_str = os.getenv("ALLOWED_GUILD_IDS", "").strip()
+    if allowed_str:
         try:
-            await client.start(token)
-        except Exception as e:
-            state["error"] = str(e)
-            state["ready"] = False
-            state["connected"] = False
+            allowed_ids = {
+                int(gid.strip()) for gid in allowed_str.split(",") if gid.strip()
+            }
+            guilds = [g for g in guilds if int(g["id"]) in allowed_ids]
+        except ValueError:
+            st.error(
+                "❌ Invalid ALLOWED_GUILD_IDS format. Must be comma-separated numeric guild IDs."
+            )
+            return []
 
-    # Create new event loop for this thread
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    state["loop"] = loop
-
-    try:
-        loop.run_until_complete(run_bot())
-    except KeyboardInterrupt:
-        pass
-    finally:
-        loop.close()
+    return guilds
 
 
-# Get guilds synchronously
-def get_guilds(client):
-    """Get list of guilds the bot is in, filtered by ALLOWED_GUILD_IDS if set"""
-    if client and client.is_ready():
-        guilds = client.guilds
-
-        # Check if guild filtering is enabled
-        allowed_guild_ids_str = os.getenv("ALLOWED_GUILD_IDS")
-        if allowed_guild_ids_str:
-            try:
-                # Parse comma-separated guild IDs
-                allowed_guild_ids = [
-                    int(guild_id.strip())
-                    for guild_id in allowed_guild_ids_str.split(",")
-                    if guild_id.strip()
-                ]
-                # Filter guilds by allowed IDs
-                guilds = [guild for guild in guilds if guild.id in allowed_guild_ids]
-            except ValueError:
-                st.error(
-                    "❌ Invalid ALLOWED_GUILD_IDS format. Must be comma-separated numeric guild IDs."
-                )
-                return []
-
-        return guilds
-    return []
+@st.cache_data(ttl=300, show_spinner=False)
+def fetch_channels(token: str, guild_id: str) -> List[Dict]:
+    """Fetch text/announcement channels for a guild, sorted by position."""
+    r = requests.get(
+        f"{DISCORD_API_BASE}/guilds/{guild_id}/channels", headers=_bot_headers(token)
+    )
+    r.raise_for_status()
+    channels: List[Dict] = r.json()
+    # Type 0 = GUILD_TEXT, Type 5 = GUILD_ANNOUNCEMENT
+    text_channels = [c for c in channels if c.get("type") in (0, 5)]
+    return sorted(text_channels, key=lambda c: c.get("position", 0))
 
 
-# Get channels in a guild
-def get_channels(guild):
-    """Get text channels in a guild"""
-    return [
-        channel
-        for channel in guild.channels
-        if isinstance(channel, discord.TextChannel)
-    ]
+@st.cache_data(ttl=300, show_spinner=False)
+def fetch_members(token: str, guild_id: str) -> List[Dict]:
+    """Fetch all non-bot members of a guild with automatic pagination."""
+    headers = _bot_headers(token)
+    members: List[Dict] = []
+    after: Optional[str] = None
 
+    while True:
+        params: Dict = {"limit": 1000}
+        if after:
+            params["after"] = after
 
-def get_guild_members(guild):
-    """Get non-bot members of a guild, sorted by display name"""
-    if not guild:
-        return []
+        r = requests.get(
+            f"{DISCORD_API_BASE}/guilds/{guild_id}/members",
+            headers=headers,
+            params=params,
+        )
+        r.raise_for_status()
+        batch: List[Dict] = r.json()
+
+        members.extend([m for m in batch if not m["user"].get("bot", False)])
+
+        if len(batch) < 1000:
+            break
+        after = batch[-1]["user"]["id"]
+
     return sorted(
-        [member for member in guild.members if not member.bot],
-        key=lambda m: m.display_name.lower(),
+        members,
+        key=lambda m: (m.get("nick") or m["user"]["username"]).lower(),
     )
 
 
-def format_member_label(member):
-    """Format a member for display in the selector"""
-    if member.nick:
-        return f"{member.nick} (@{member.name})"
-    return f"@{member.name}"
+def send_message(
+    token: str,
+    channel_id: str,
+    content: str,
+    files: Optional[List[Tuple[str, bytes]]] = None,
+) -> None:
+    """
+    Send a message (with optional file attachments) to a Discord channel.
+    Raises requests.HTTPError on failure.
+    """
+    url = f"{DISCORD_API_BASE}/channels/{channel_id}/messages"
+    headers = _bot_headers(token)
+
+    if files:
+        # Multipart form upload — let requests set the Content-Type boundary
+        form_data: Dict[str, str] = {}
+        if content:
+            form_data["content"] = content
+
+        multipart = [
+            (f"files[{i}]", (name, io.BytesIO(data), "application/octet-stream"))
+            for i, (name, data) in enumerate(files)
+        ]
+        r = requests.post(url, headers=headers, data=form_data, files=multipart)
+    else:
+        r = requests.post(url, headers=headers, json={"content": content})
+
+    r.raise_for_status()
 
 
-def build_mention(member):
-    """Build a Discord mention string for a member"""
-    return f"<@{member.id}>"
+# ---------------------------------------------------------------------------
+# Formatting helpers
+# ---------------------------------------------------------------------------
 
 
-# Send message to Discord
-async def send_discord_message(
-    client, channel_id: int, content: str, files: Optional[List] = None
-):
-    """Send a message to a Discord channel"""
-    if not client or not client.is_ready():
-        return False
-
-    channel = client.get_channel(channel_id)
-    if not channel:
-        return False
-
-    try:
-        discord_files = []
-        if files:
-            for file_info in files:
-                file_name, file_bytes = file_info
-                discord_file = discord.File(io.BytesIO(file_bytes), filename=file_name)
-                discord_files.append(discord_file)
-
-        if content or discord_files:
-            await channel.send(
-                content=content if content else None, files=discord_files
-            )
-            return True
-        else:
-            return False
-    except Exception as e:
-        st.error(f"Failed to send message: {e}")
-        return False
+def format_member_label(member: Dict) -> str:
+    nick = member.get("nick")
+    username = member["user"]["username"]
+    return f"{nick} (@{username})" if nick else f"@{username}"
 
 
-def run_async_in_bot_loop(state, coro):
-    """Run a coroutine in the bot's event loop"""
-    if not state["loop"] or not state["client"]:
-        return None
-
-    future = asyncio.run_coroutine_threadsafe(coro, state["loop"])
-    try:
-        return future.result(timeout=30)
-    except Exception as e:
-        st.error(f"Error executing async operation: {e}")
-        return None
+def build_mention(member: Dict) -> str:
+    return f"<@{member['user']['id']}>"
 
 
+# ---------------------------------------------------------------------------
 # Main app
+# ---------------------------------------------------------------------------
+
+
 def main():
     st.title("📝 Discord Post Manager")
     st.markdown("Post messages to Discord channels using a shared bot account")
 
-    # Get Discord token from environment
-    discord_token = os.getenv("BOT_TOKEN")
-
+    discord_token = os.getenv("BOT_TOKEN", "").strip()
     if not discord_token:
         st.error("❌ BOT_TOKEN environment variable not set!")
-        st.info("Please set the BOT_TOKEN environment variable with your bot's token")
+        st.info("Please set the BOT_TOKEN environment variable with your bot's token.")
         st.stop()
 
-    # Get bot state
-    state = get_bot_state()
-
-    # Start bot if not already started
-    if state["thread"] is None:
-        state["thread"] = threading.Thread(
-            target=start_bot_background, args=(discord_token, state), daemon=True
-        )
-        state["thread"].start()
-        # Give it a moment to start
-        import time
-
-        time.sleep(2)
-
-    # Status indicator (sidebar already has user info at top)
+    # Sidebar — bot connectivity status
     with st.sidebar:
         st.header("🤖 Bot Status")
-
-        if state["error"]:
-            st.error(f"❌ Error: {state['error']}")
-        elif state["ready"] and state["connected"]:
+        try:
+            bot_user = fetch_bot_user(discord_token)
             st.success("✅ Connected")
-            if state["user"]:
-                st.info(f"Logged in as: {state['user'].name}")
-        elif state["thread"] and state["thread"].is_alive():
-            st.warning("⏳ Connecting...")
-        else:
-            st.error("❌ Not connected")
+            st.info(f"Logged in as: **{bot_user['username']}**")
+        except requests.HTTPError as e:
+            st.error(
+                f"❌ Discord API error: {e.response.status_code} {e.response.reason}"
+            )
+            st.stop()
+        except requests.RequestException as e:
+            st.error(f"❌ Cannot reach Discord API: {e}")
+            st.stop()
 
-        # Refresh button
-        if st.button("🔄 Refresh Status"):
+        if st.button("🔄 Refresh"):
+            fetch_bot_user.clear()
+            fetch_guilds.clear()
+            fetch_channels.clear()
+            fetch_members.clear()
             st.rerun()
 
-    # Main form
+    # Main content
     with st.container():
         st.header("Create Post")
 
-        # Check if bot is ready
-        if not state["ready"] or not state["client"]:
-            st.warning("⏳ Waiting for bot to connect...")
-            st.info(
-                "The bot is connecting to Discord. This may take a few seconds. Click 'Refresh Status' in the sidebar."
-            )
-
-            if st.button("🔄 Retry Connection"):
-                st.rerun()
-
-            st.stop()
-
-        # Fetch guilds
         try:
-            client = state["client"]
-            guilds = get_guilds(client)
+            guilds = fetch_guilds(discord_token)
 
             if not guilds:
                 st.warning(
-                    "Bot is not in any servers. Please invite the bot to a server first."
-                )
-                st.info(
-                    "Make sure you've invited the bot to at least one Discord server. "
-                    "Check the README for instructions on how to invite the bot."
+                    "The bot is not in any servers (or none match ALLOWED_GUILD_IDS). "
+                    "Please invite the bot to a server first."
                 )
                 st.stop()
 
-            # Guild selection
-            guild_names = {guild.name: guild for guild in guilds}
+            guild_map = {g["name"]: g for g in guilds}
             selected_guild_name = st.selectbox(
                 "Select Server (Guild)",
-                options=list(guild_names.keys()),
+                options=list(guild_map.keys()),
                 help="Choose the Discord server to post to",
             )
 
-            if selected_guild_name:
-                selected_guild = guild_names[selected_guild_name]
+            if not selected_guild_name:
+                st.stop()
 
-                # Channel selection
-                channels = get_channels(selected_guild)
+            selected_guild = guild_map[selected_guild_name]
+            channels = fetch_channels(discord_token, selected_guild["id"])
 
-                if not channels:
-                    st.warning(f"No text channels found in {selected_guild_name}")
-                    st.stop()
+            if not channels:
+                st.warning(f"No text channels found in **{selected_guild_name}**.")
+                st.stop()
 
-                channel_names = {channel.name: channel for channel in channels}
-                selected_channel_name = st.selectbox(
-                    "Select Channel",
-                    options=list(channel_names.keys()),
-                    help="Choose the channel to post to",
-                )
+            channel_map = {c["name"]: c for c in channels}
+            selected_channel_name = st.selectbox(
+                "Select Channel",
+                options=list(channel_map.keys()),
+                help="Choose the channel to post to",
+            )
 
-                if selected_channel_name:
-                    selected_channel = channel_names[selected_channel_name]
+            if not selected_channel_name:
+                st.stop()
 
-                    # Message content
-                    st.subheader("Message Content")
+            selected_channel = channel_map[selected_channel_name]
 
-                    # Member tagging section
-                    with st.expander("🏷️ Tag Members", expanded=False):
-                        members = get_guild_members(selected_guild)
+            # Message content
+            st.subheader("Message Content")
 
-                        if not members:
-                            st.info(
-                                "No members found. Make sure the bot has the **Server Members Intent** "
-                                "enabled in the Discord Developer Portal."
-                            )
-                        else:
-                            st.caption(
-                                f"{len(members)} member(s) in **{selected_guild_name}**. "
-                                "Select one or more to insert their mention(s) into the message."
-                            )
+            with st.expander("🏷️ Tag Members", expanded=False):
+                members = fetch_members(discord_token, selected_guild["id"])
 
-                            member_map = {format_member_label(m): m for m in members}
-
-                            selected_member_labels = st.multiselect(
-                                "Search and select members to tag",
-                                options=list(member_map.keys()),
-                                placeholder="Type a name to search...",
-                                help="Selected members will be inserted as mentions at the end of your message when you click 'Insert Mentions'.",
-                            )
-
-                            if selected_member_labels:
-                                mention_preview = " ".join(
-                                    build_mention(member_map[label])
-                                    for label in selected_member_labels
-                                )
-                                st.code(mention_preview, language=None)
-                                st.caption(
-                                    "👆 This is how the mentions will appear in your message."
-                                )
-
-                                if st.button("➕ Insert Mentions into Message"):
-                                    existing = st.session_state.get("post_content", "")
-                                    separator = (
-                                        " "
-                                        if existing and not existing.endswith(" ")
-                                        else ""
-                                    )
-                                    st.session_state["post_content"] = (
-                                        existing + separator + mention_preview
-                                    )
-                                    st.rerun()
-
-                    message_content = st.text_area(
-                        "Post Content",
-                        height=200,
-                        placeholder="Write your message here...",
-                        help="Enter the text content of your post. Use the 'Tag Members' section above to insert member mentions.",
-                        key="post_content",
+                if not members:
+                    st.info(
+                        "No members found. Make sure the bot has the **Server Members Intent** "
+                        "enabled in the Discord Developer Portal."
+                    )
+                else:
+                    st.caption(
+                        f"{len(members)} member(s) in **{selected_guild_name}**. "
+                        "Select one or more to insert their mention(s) into the message."
                     )
 
-                    # File uploads
-                    st.subheader("Attachments")
-                    uploaded_files = st.file_uploader(
-                        "Upload files (images, videos, gifs, etc.)",
-                        accept_multiple_files=True,
-                        help="Upload files to attach to your post",
+                    member_map = {format_member_label(m): m for m in members}
+                    selected_labels = st.multiselect(
+                        "Search and select members to tag",
+                        options=list(member_map.keys()),
+                        placeholder="Type a name to search...",
+                        help="Selected members will be inserted as mentions into your message.",
                     )
 
-                    # Display file info
-                    if uploaded_files:
-                        st.write("**Selected files:**")
-                        for file in uploaded_files:
-                            file_size_mb = file.size / (1024 * 1024)
-                            st.write(f"- {file.name} ({file_size_mb:.2f} MB)")
-
-                    # Submit button
-                    col1, col2 = st.columns([1, 4])
-                    with col1:
-                        submit_button = st.button(
-                            "📤 Send Post", type="primary", use_container_width=True
+                    if selected_labels:
+                        mention_preview = " ".join(
+                            build_mention(member_map[label])
+                            for label in selected_labels
+                        )
+                        st.code(mention_preview)
+                        st.caption(
+                            "👆 This is how the mentions will appear in your message."
                         )
 
-                    if submit_button:
-                        if not message_content and not uploaded_files:
-                            st.error(
-                                "Please enter message content or upload at least one file"
+                        if st.button("➕ Insert Mentions into Message"):
+                            existing = st.session_state.get("post_content", "")
+                            separator = (
+                                " " if existing and not existing.endswith(" ") else ""
                             )
-                        else:
-                            with st.spinner("Sending message to Discord..."):
-                                # Prepare files
-                                files_to_send = []
-                                if uploaded_files:
-                                    for file in uploaded_files:
-                                        file_bytes = file.read()
-                                        files_to_send.append((file.name, file_bytes))
+                            st.session_state["post_content"] = (
+                                existing + separator + mention_preview
+                            )
+                            st.rerun()
 
-                                # Send message using bot's event loop
-                                success = run_async_in_bot_loop(
-                                    state,
-                                    send_discord_message(
-                                        client,
-                                        selected_channel.id,
-                                        message_content,
-                                        files_to_send if files_to_send else None,
-                                    ),
-                                )
+            message_content = st.text_area(
+                "Post Content",
+                height=200,
+                placeholder="Write your message here...",
+                help="Enter the text content of your post. Use the 'Tag Members' section above to insert mentions.",
+                key="post_content",
+            )
 
-                                if success:
-                                    st.success(
-                                        f"✅ Message sent successfully to #{selected_channel_name} in {selected_guild_name}!"
-                                    )
-                                    st.balloons()
-                                else:
-                                    st.error(
-                                        "Failed to send message. Please check bot permissions and try again."
-                                    )
+            # File uploads
+            st.subheader("Attachments")
+            uploaded_files = st.file_uploader(
+                "Upload files (images, videos, gifs, etc.)",
+                accept_multiple_files=True,
+                help="Upload files to attach to your post",
+            )
 
+            if uploaded_files:
+                st.write("**Selected files:**")
+                for f in uploaded_files:
+                    st.write(f"- {f.name} ({f.size / (1024 * 1024):.2f} MB)")
+
+            # Submit
+            col1, _ = st.columns([1, 4])
+            with col1:
+                submit = st.button(
+                    "📤 Send Post", type="primary", use_container_width=True
+                )
+
+            if submit:
+                if not message_content and not uploaded_files:
+                    st.error(
+                        "Please enter message content or upload at least one file."
+                    )
+                else:
+                    with st.spinner("Sending message to Discord..."):
+                        files_to_send = (
+                            [(f.name, f.read()) for f in uploaded_files]
+                            if uploaded_files
+                            else None
+                        )
+                        try:
+                            send_message(
+                                discord_token,
+                                selected_channel["id"],
+                                message_content,
+                                files_to_send,
+                            )
+                            st.success(
+                                f"✅ Message sent successfully to "
+                                f"**#{selected_channel_name}** in **{selected_guild_name}**!"
+                            )
+                            st.balloons()
+                        except requests.HTTPError as e:
+                            st.error(
+                                f"❌ Discord rejected the message "
+                                f"({e.response.status_code}): {e.response.text}"
+                            )
+                        except requests.RequestException as e:
+                            st.error(f"❌ Failed to send message: {e}")
+
+        except requests.HTTPError as e:
+            st.error(
+                f"❌ Discord API error ({e.response.status_code}): {e.response.text}"
+            )
         except Exception as e:
-            st.error(f"An error occurred: {e}")
+            st.error(f"An unexpected error occurred: {e}")
             st.exception(e)
 
-    # Footer
     st.divider()
     st.markdown(
-        """
-        <div style='text-align: center; color: gray; padding: 20px;'>
-            <small>Discord Post Manager | Using py-cord & Streamlit</small>
-        </div>
-        """,
+        "<div style='text-align: center; color: gray; padding: 20px;'>"
+        "<small>Discord Post Manager | Discord REST API &amp; Streamlit</small>"
+        "</div>",
         unsafe_allow_html=True,
     )
 
