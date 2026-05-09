@@ -1,3 +1,4 @@
 requests
 streamlit>=1.54.0
 Authlib
+streamlit[auth]
