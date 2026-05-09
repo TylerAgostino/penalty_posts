@@ -42,7 +42,7 @@ if not TOKEN:
 
 # Pre-select this channel ID as the default posting target.
 # Leave as "" to require manual selection each time.
-DEFAULT_POST_CHANNEL_ID: str = "1224825723907477586"
+DEFAULT_POST_CHANNEL_ID: str = "1239988445326348460"
 
 # Pre-filter the queue to threads from this forum channel ID.
 # Leave as "" to show threads from all forum channels.
