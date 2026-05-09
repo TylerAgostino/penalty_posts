@@ -53,6 +53,21 @@ DEFAULT_FORUM_CHANNEL_ID: str = "1462883598351863839"
 TAGS_TO_REMOVE_ON_CLOSE: List[str] = ["Under Review"]
 
 # ---------------------------------------------------------------------------
+# Poll vote mapping — regional indicator emoji → penalty option label
+# ---------------------------------------------------------------------------
+# Each tuple: (unicode_char, display_emoji, label)
+POLL_EMOJI_MAP: List[Tuple[str, str, str]] = [
+    ("\U0001f1e6", "🇦", "No Action"),
+    ("\U0001f1e7", "🇧", "1 Point"),
+    ("\U0001f1e8", "🇨", "2 Points"),
+    ("\U0001f1e9", "🇩", "3 Points"),
+    ("\U0001f1ea", "🇪", "4 Points"),
+    ("\U0001f1eb", "🇫", "5 Points"),
+    ("\U0001f1ec", "🇬", "6 Points"),
+    ("\U0001f1ed", "🇭", "Other"),
+]
+
+# ---------------------------------------------------------------------------
 # Session state initialisation
 # ---------------------------------------------------------------------------
 _SS_DEFAULTS: Dict = {
@@ -175,6 +190,46 @@ def _collect_thread_attachments(
 def _attachment_label(att: Dict) -> str:
     size_str = dh.format_size(att.get("size", 0))
     return f"{att['filename']} ({size_str}) — from {att['_author']}"
+
+
+def _find_poll_votes(messages: List[Dict], bot_id: str) -> Optional[Dict[str, int]]:
+    """
+    Search thread messages for the bot's poll post (identified by having
+    regional-indicator-emoji reactions) and return a dict mapping each
+    penalty label to its real vote count.
+
+    The bot adds a placeholder reaction to every option so they all appear;
+    that self-reaction is subtracted from each count where ``me`` is True.
+
+    Returns None if no poll message is found.
+    """
+    poll_chars = {char for char, _, _ in POLL_EMOJI_MAP}
+
+    for msg in messages:
+        if msg.get("author", {}).get("id") != bot_id:
+            continue
+        reactions = msg.get("reactions", [])
+        if not reactions:
+            continue
+        emoji_names = {r["emoji"]["name"] for r in reactions}
+        if not emoji_names.intersection(poll_chars):
+            continue
+
+        # Found the poll message — build the vote counts
+        reaction_by_char = {r["emoji"]["name"]: r for r in reactions}
+        votes: Dict[str, int] = {}
+        for char, _display, label in POLL_EMOJI_MAP:
+            r = reaction_by_char.get(char)
+            if r:
+                count = r["count"]
+                if r.get("me", False):
+                    count = max(0, count - 1)  # Strip the bot's placeholder
+                votes[label] = count
+            else:
+                votes[label] = 0
+        return votes
+
+    return None
 
 
 # ===========================================================================
@@ -449,6 +504,25 @@ def show_editor() -> None:
                                 f"📎 [{att['filename']}]({att['url']}) ({size_str})"
                             )
 
+        # ── Vote distribution ──
+        _bot_id = dh.fetch_bot_user(TOKEN).get("id", "")
+        _poll_votes = _find_poll_votes(messages, _bot_id)
+        if _poll_votes is not None:
+            st.subheader("🗳️ Vote Distribution")
+            _total_votes = sum(_poll_votes.values())
+            if _total_votes == 0:
+                st.caption("No votes cast yet.")
+            else:
+                st.caption(
+                    f"{_total_votes} vote{'s' if _total_votes != 1 else ''} cast"
+                )
+                for _label, _count in _poll_votes.items():
+                    _pct = _count / _total_votes if _total_votes else 0
+                    _vc_label, _vc_count = st.columns([5, 1])
+                    _vc_label.write(f"**{_label}**")
+                    _vc_count.write(f"**{_count}**")
+                    st.progress(_pct)
+
     # ── Right column: Post editor ──
     with col_edit:
         st.subheader("✏️ Draft Post")
@@ -527,7 +601,7 @@ def show_editor() -> None:
         post_content = st.text_area(
             "Post content",
             value=default_content,
-            height=200,
+            height=700,
             placeholder="Write the incident summary here…",
             key="editor_content",
         )
