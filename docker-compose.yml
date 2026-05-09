@@ -16,4 +16,10 @@ services:
       - OIDC_ALLOWED_DOMAINS=${OIDC_ALLOWED_DOMAINS}
       - OIDC_ALLOWED_EMAILS=${OIDC_ALLOWED_EMAILS}
       - ALLOWED_GUILD_IDS=${ALLOWED_GUILD_IDS}
+    volumes:
+      # Persist drafts, posts, and stored upload files across container restarts
+      - penalty-posts-data:/app/data
     restart: unless-stopped
+
+volumes:
+  penalty-posts-data:
