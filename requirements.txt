@@ -3,3 +3,5 @@ streamlit>=1.54.0
 Authlib
 streamlit[auth]
 httpx
+strands-agents
+ollama  # Required for Ollama model provider with strands-agents

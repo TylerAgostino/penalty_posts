@@ -14,6 +14,7 @@ import streamlit as st
 
 import discord_helpers as dh
 import draft_manager as dm
+import llm_client as lc
 
 # ---------------------------------------------------------------------------
 # Authentication
@@ -424,6 +425,17 @@ def show_editor() -> None:
 
     st.divider()
 
+    # Post template - defined early so it can be used by LLM fallback
+    post_template = """## Event: S##R# - Track Name - Feature Lap #
+
+### Driver(s)
+
+### Incident(s)
+
+### Decision(s)
+**__No Action__**
+        """
+
     # Fetch members early — cached, so this is free on re-runs.
     # Used for both conversation display names and the member-tagging widget.
     try:
@@ -587,16 +599,15 @@ def show_editor() -> None:
                     st.session_state["editor_content"] = existing + sep + mention_str
                     st.rerun()
 
+        # Button to Auto-generate post content
+        if st.button("🤖 Generate Draft from Conversation"):
+            with st.spinner("🤖 Generating draft from conversation..."):
+                generated_content = lc.generate_post_for_thread(
+                    messages, thread, TOKEN, example_message_ids=[1529238325922365541, 1529235282430394492]
+                )
+                if generated_content:
+                    st.session_state["editor_content"] = generated_content
         # Post content
-        post_template = """## Event: S##R# - Track Name - Feature Lap #
-
-### Driver(s)
-
-### Incident(s)
-
-### Decision(s)
-**__No Action__**
-        """
         default_content = draft.get("post_content", "") if draft else post_template
         post_content = st.text_area(
             "Post content",
