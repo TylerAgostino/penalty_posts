@@ -13,6 +13,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY app.py .
 COPY discord_helpers.py .
 COPY draft_manager.py .
+COPY llm_client.py .
 
 # Copy secrets script
 COPY setup-secrets.sh .
