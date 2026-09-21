@@ -5,11 +5,11 @@ import os
 from typing import Dict, List, Optional
 
 from strands import Agent
-from strands.models.ollama import OllamaModel
+from strands.models.openai import OpenAIModel
 
 # Default configuration
-OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://192.168.1.152:11434")
-OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "hf.co/unsloth/Qwen3-Coder-Next-GGUF:UD-Q4_K_M")
+OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://192.168.1.152:11080")
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "unsloth/Qwen3.8-Flash-Next-GGUF:UD-IQ3_XXS")
 
 
 def _format_thread_conversation(messages: List[Dict]) -> str:
@@ -191,11 +191,12 @@ def _build_agent(system_prompt: str) -> Agent:
     Uses cached model configuration for consistent behavior.
     """
     # Create the Ollama model
-    ollama_model = OllamaModel(
-        host=OLLAMA_BASE_URL,
+    ollama_model = OpenAIModel(
+        client_args={"base_url": OLLAMA_BASE_URL},
+        params={
+            "temperature": 0.3,
+        },
         model_id=OLLAMA_MODEL,
-        temperature=0.3,  # Low temperature for more consistent outputs
-        options={"num_ctx": 8192},  # Large context window
     )
 
     # Create agent with system prompt (no tools needed for this task)
