@@ -142,6 +142,14 @@ def fetch_members(token: str, guild_id: str) -> List[Dict]:
     )
 
 
+@st.cache_data(ttl=300, show_spinner=False)
+def fetch_roles(token: str, guild_id: str) -> List[Dict]:
+    """Fetch all guild roles (excluding @everyone) sorted by position, highest first."""
+    roles: List[Dict] = _get(token, f"/guilds/{guild_id}/roles").json()
+    roles = [r for r in roles if r.get("id") != guild_id]
+    return sorted(roles, key=lambda r: r.get("position", 0), reverse=True)
+
+
 # ---------------------------------------------------------------------------
 # Forum thread helpers
 # ---------------------------------------------------------------------------
@@ -351,6 +359,14 @@ def build_mention(member: Dict) -> str:
     return f"<@{member['user']['id']}>"
 
 
+def format_role_label(role: Dict) -> str:
+    return f"@{role['name']}"
+
+
+def build_role_mention(role: Dict) -> str:
+    return f"<@&{role['id']}>"
+
+
 def format_timestamp(iso_str: str) -> str:
     """Format an ISO 8601 timestamp for display."""
     try:
@@ -396,3 +412,4 @@ def clear_caches() -> None:
     fetch_thread_messages.clear()
     fetch_single_message.clear()
     fetch_members.clear()
+    fetch_roles.clear()

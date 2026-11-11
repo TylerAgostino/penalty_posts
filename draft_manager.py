@@ -39,6 +39,7 @@ def save_draft(draft: Dict) -> str:
         selected_discord_attachments (list of attachment dicts with url/filename/size),
         local_uploads (list of {filename, stored_path, size, content_type}),
         tagged_member_ids, tagged_member_labels,
+        tagged_role_ids, tagged_role_labels,
         created_at, updated_at, created_by_email, created_by_name
     """
     _ensure_dirs()

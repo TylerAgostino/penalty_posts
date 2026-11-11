@@ -445,6 +445,18 @@ def show_editor() -> None:
     member_map_by_id: Dict[str, Dict] = {m["user"]["id"]: m for m in members}
     member_map: Dict[str, Dict] = {dh.format_member_label(m): m for m in members}
 
+    # Fetch roles early — cached, so this is free on re-runs.
+    try:
+        roles = dh.fetch_roles(TOKEN, GUILD_ID)
+    except requests.RequestException:
+        roles = []
+    role_map: Dict[str, Dict] = {}
+    for role in roles:
+        role_label = dh.format_role_label(role)
+        if role_label in role_map:  # Duplicate role names get an ID suffix
+            role_label = f"{role_label} ·{role['id'][-4:]}"
+        role_map[role_label] = role
+
     # Fetch thread messages (cached)
     with st.spinner("Loading thread messages..."):
         try:
@@ -572,8 +584,8 @@ def show_editor() -> None:
         )
         selected_channel = text_channels[selected_ch_idx] if text_channels else None
 
-        # Member tagging
-        with st.expander("🏷️ Tag Members", expanded=False):
+        # Member & role tagging
+        with st.expander("🏷️ Tag Members & Roles", expanded=False):
             # member_map already built above from the cached fetch
             default_tags = draft.get("tagged_member_labels", []) if draft else []
             default_tags = [
@@ -588,10 +600,25 @@ def show_editor() -> None:
                 key="editor_members",
             )
 
-            if selected_member_labels:
-                mention_str = " ".join(
-                    dh.build_mention(member_map[lbl]) for lbl in selected_member_labels
-                )
+            # role_map already built above from the cached fetch
+            default_role_tags = draft.get("tagged_role_labels", []) if draft else []
+            default_role_tags = [
+                t for t in default_role_tags if t in role_map
+            ]  # Filter stale labels
+
+            selected_role_labels = st.multiselect(
+                "Search and select roles to mention",
+                options=list(role_map.keys()),
+                default=default_role_tags,
+                placeholder="Type a role to search…",
+                key="editor_roles",
+            )
+
+            mention_str = " ".join(
+                [dh.build_mention(member_map[lbl]) for lbl in selected_member_labels]
+                + [dh.build_role_mention(role_map[lbl]) for lbl in selected_role_labels]
+            )
+            if mention_str:
                 st.code(mention_str, language=None)
                 if st.button("➕ Insert mentions into post"):
                     existing = st.session_state.get("editor_content", "")
@@ -678,6 +705,10 @@ def show_editor() -> None:
                         selected_member_labels if selected_member_labels else []
                     ),
                     member_map=member_map,
+                    selected_role_labels=(
+                        selected_role_labels if selected_role_labels else []
+                    ),
+                    role_map=role_map,
                     active_stored=active_stored,
                     new_uploads=new_uploads or [],
                     selected_channel=selected_channel,
@@ -724,6 +755,8 @@ def _do_save_draft(
     label_to_att: Dict[str, Dict],
     selected_member_labels: List[str],
     member_map: Dict[str, Dict],
+    selected_role_labels: List[str],
+    role_map: Dict[str, Dict],
     active_stored: List[Dict],
     new_uploads: list,
     selected_channel: Optional[Dict],
@@ -782,6 +815,10 @@ def _do_save_draft(
             if lbl in member_map
         ],
         "tagged_member_labels": selected_member_labels,
+        "tagged_role_ids": [
+            role_map[lbl]["id"] for lbl in selected_role_labels if lbl in role_map
+        ],
+        "tagged_role_labels": selected_role_labels,
         "created_by_email": USER_EMAIL,
         "created_by_name": USER_NAME,
     }
